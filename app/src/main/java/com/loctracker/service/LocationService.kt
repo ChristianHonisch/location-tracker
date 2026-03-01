@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
@@ -66,8 +65,6 @@ class LocationService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val handler = Handler(Looper.getMainLooper())
-    private var resumeRunnable: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -76,6 +73,21 @@ class LocationService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
+                    // If paused, check if it's time to auto-resume
+                    if (_state.value == TrackingState.PAUSED) {
+                        if (System.currentTimeMillis() >= _resumeAtMillis.value) {
+                            // Pause duration expired — auto-resume
+                            _resumeAtMillis.value = 0L
+                            _state.value = TrackingState.TRACKING
+                            updateNotification("Recording your location")
+                            Log.d(TAG, "Auto-resumed from pause")
+                        } else {
+                            // Still paused — discard this location
+                            Log.d(TAG, "Paused — discarding location")
+                            return
+                        }
+                    }
+
                     Log.d(TAG, "Location received: ${location.latitude}, ${location.longitude}")
                     val dao = AppDatabase.getInstance(this@LocationService).locationDao()
                     serviceScope.launch {
@@ -143,49 +155,31 @@ class LocationService : Service() {
     }
 
     private fun pauseTracking(durationMs: Long) {
-        // Stop location updates but keep service alive
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-
+        // Don't stop location updates — just mark as paused.
+        // The locationCallback will discard locations until the pause expires.
         val resumeAt = System.currentTimeMillis() + durationMs
         _resumeAtMillis.value = resumeAt
         _state.value = TrackingState.PAUSED
 
-        // Update notification
         val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
         val resumeTimeStr = timeFormat.format(Date(resumeAt))
         updateNotification("Paused — resumes at $resumeTimeStr")
-
-        // Schedule auto-resume
-        resumeRunnable?.let { handler.removeCallbacks(it) }
-        resumeRunnable = Runnable { resumeTracking() }
-        handler.postDelayed(resumeRunnable!!, durationMs)
 
         Log.d(TAG, "Tracking paused for ${durationMs / 1000 / 60} min, resumes at $resumeTimeStr")
     }
 
     private fun resumeTracking() {
-        // Cancel any pending resume timer
-        resumeRunnable?.let { handler.removeCallbacks(it) }
-        resumeRunnable = null
         _resumeAtMillis.value = 0L
-
-        // Restart location updates
-        startLocationUpdates()
         _state.value = TrackingState.TRACKING
-
         updateNotification("Recording your location")
-        Log.d(TAG, "Tracking resumed")
+        Log.d(TAG, "Tracking resumed (manual)")
     }
 
     private fun stopTracking() {
         if (_state.value == TrackingState.STOPPED) return
 
-        // Cancel any pending resume timer
-        resumeRunnable?.let { handler.removeCallbacks(it) }
-        resumeRunnable = null
-        _resumeAtMillis.value = 0L
-
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        _resumeAtMillis.value = 0L
         _state.value = TrackingState.STOPPED
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -236,7 +230,6 @@ class LocationService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        resumeRunnable?.let { handler.removeCallbacks(it) }
         if (_state.value != TrackingState.STOPPED) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
             _state.value = TrackingState.STOPPED
