@@ -194,7 +194,9 @@ class LocationService : Service() {
             }
             ACTION_STOP -> stopTracking()
             ACTION_PAUSE -> {
+                val maxPauseMs = 1440L * 60 * 1000 // 24 hours
                 val durationMs = intent.getLongExtra(EXTRA_PAUSE_DURATION_MS, 0L)
+                    .coerceAtMost(maxPauseMs)
                 if (durationMs > 0 && _state.value == TrackingState.TRACKING) {
                     pauseTracking(durationMs)
                 }

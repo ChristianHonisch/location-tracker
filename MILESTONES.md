@@ -48,15 +48,27 @@
 - Status card on Home screen displays the actual configured interval
 - Removed hardcoded `TRACKING_INTERVAL_MS` constant — interval is now fully configurable
 
+### Milestone 5b: Bottom Navigation
+- Material 3 `NavigationBar` with three tabs: Home | History | Settings
+- State-based navigation (no Jetpack Navigation dependency — simple `when` block)
+- Replaced gear icon + back arrow with proper tab navigation
+- Settings screen is now a tab (no `onBack` parameter, no back arrow)
+- Placeholder History screen showing total point count (full implementation in Milestone 7)
+- Extracted `HomeScreen` from `MainActivity.kt` into `ui/screens/HomeScreen.kt` (~550 lines)
+- `MainActivity.kt` slimmed to ~85 lines (navigation scaffold only)
+- Top app bar shared across all tabs with "LocTracker" title
+
+### Code Review Tier 1 Fixes (applied alongside 5a)
+- BUG-2: Guard `ACTION_UPDATE_SETTINGS` — only send if service is not stopped
+- BUG-3: Send `ACTION_RESUME` from UI when pause countdown reaches 0
+- BUG-4: Notification permission race — return after launch, start from callback
+- ISSUE-1: Persist tracking state to DataStore (UI survives process death)
+- ISSUE-3: Cap custom pause at 1440 min (24h) in UI + defensive cap in service
+- DOC fixes: goal.md precision default, MILESTONES.md wording, KNOWN_ISSUES.md updates
+
 ---
 
 ## Planned
-
-### Milestone 5b: Bottom Navigation
-- Add bottom navigation bar: Home | History | Settings
-- Replace gear icon / simple screen switching with proper navigation
-- Move Settings screen into the nav bar
-- Placeholder History screen (to be implemented in Milestone 7)
 
 ### Milestone 6: Boot Auto-Start
 - `BootReceiver` registered in AndroidManifest for `BOOT_COMPLETED`
