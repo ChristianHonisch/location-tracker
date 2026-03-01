@@ -15,7 +15,7 @@ LocTracker is a privacy-first Android app for personal location tracking. It run
 
 ### Location Precision
 - **Configurable precision**: toggle between high accuracy (GPS, ~10m) and balanced power (network/Wi-Fi, ~100m)
-- Default: balanced power for low energy consumption
+- Default: high accuracy (GPS) for best location precision
 
 ### Data Recorded Per Point
 - Latitude
@@ -63,7 +63,7 @@ LocTracker is a privacy-first Android app for personal location tracking. It run
 |-------------------|-------------------------------------|
 | Language           | Kotlin                              |
 | Min SDK            | Android 8.0 (API 26)                |
-| Target SDK         | Android 15 (API 35)                 |
+| Target SDK         | Android 16 (API 36)                 |
 | UI Framework       | Jetpack Compose (Material 3)        |
 | Architecture       | MVVM                                |
 | Database           | Room (SQLite)                       |

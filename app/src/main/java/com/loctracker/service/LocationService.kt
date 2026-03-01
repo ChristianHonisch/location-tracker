@@ -20,6 +20,7 @@ import com.google.android.gms.location.Priority
 import com.loctracker.MainActivity
 import com.loctracker.data.db.AppDatabase
 import com.loctracker.data.db.LocationEntity
+import com.loctracker.data.preferences.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +28,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,14 +45,12 @@ class LocationService : Service() {
         const val ACTION_STOP = "com.loctracker.ACTION_STOP"
         const val ACTION_PAUSE = "com.loctracker.ACTION_PAUSE"
         const val ACTION_RESUME = "com.loctracker.ACTION_RESUME"
+        const val ACTION_UPDATE_SETTINGS = "com.loctracker.ACTION_UPDATE_SETTINGS"
 
         const val EXTRA_PAUSE_DURATION_MS = "com.loctracker.EXTRA_PAUSE_DURATION_MS"
 
         const val CHANNEL_ID = "loctracker_tracking"
         const val NOTIFICATION_ID = 1
-
-        // 1 minute for testing — change to 10 * 60 * 1000L for production
-        const val TRACKING_INTERVAL_MS = 1 * 60 * 1000L
 
         private const val TAG = "LocationService"
 
@@ -60,15 +60,59 @@ class LocationService : Service() {
 
         private val _resumeAtMillis = MutableStateFlow(0L)
         val resumeAtMillis: StateFlow<Long> = _resumeAtMillis.asStateFlow()
+
+        // Current settings (observable by the Activity for display)
+        private val _currentIntervalMinutes = MutableStateFlow(SettingsStore.DEFAULT_INTERVAL_MINUTES)
+        val currentIntervalMinutes: StateFlow<Int> = _currentIntervalMinutes.asStateFlow()
+
+        /**
+         * Restore companion-object state from DataStore on cold start.
+         * Called by MainActivity to ensure the UI shows the correct state
+         * even after Android kills and recreates the app process.
+         */
+        suspend fun restoreStateFromDataStore(context: android.content.Context) {
+            val store = SettingsStore(context)
+            val savedState = store.trackingState.first()
+            val savedResumeAt = store.resumeAtMillis.first()
+            val state = try { TrackingState.valueOf(savedState) } catch (_: Exception) { TrackingState.STOPPED }
+
+            // Only restore non-STOPPED states if the resume deadline hasn't long passed
+            when (state) {
+                TrackingState.TRACKING -> {
+                    _state.value = TrackingState.TRACKING
+                }
+                TrackingState.PAUSED -> {
+                    if (savedResumeAt > System.currentTimeMillis()) {
+                        _state.value = TrackingState.PAUSED
+                        _resumeAtMillis.value = savedResumeAt
+                    } else {
+                        // Pause already expired — show as tracking (service will confirm)
+                        _state.value = TrackingState.TRACKING
+                    }
+                }
+                TrackingState.STOPPED -> {
+                    _state.value = TrackingState.STOPPED
+                }
+            }
+        }
     }
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private lateinit var settingsStore: SettingsStore
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private fun persistState(state: TrackingState, resumeAt: Long = _resumeAtMillis.value) {
+        serviceScope.launch {
+            settingsStore.setTrackingState(state.name)
+            settingsStore.setResumeAtMillis(resumeAt)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        settingsStore = SettingsStore(this)
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
@@ -79,6 +123,7 @@ class LocationService : Service() {
                             // Pause duration expired — auto-resume
                             _resumeAtMillis.value = 0L
                             _state.value = TrackingState.TRACKING
+                            persistState(TrackingState.TRACKING, 0L)
                             updateNotification("Recording your location")
                             Log.d(TAG, "Auto-resumed from pause")
                         } else {
@@ -107,13 +152,44 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // Null intent means the system restarted us after process death (START_STICKY).
+        // Restore state from DataStore and resume tracking.
+        if (intent == null) {
+            serviceScope.launch {
+                val savedState = settingsStore.trackingState.first()
+                val state = try { TrackingState.valueOf(savedState) } catch (_: Exception) { TrackingState.STOPPED }
+                if (state != TrackingState.STOPPED) {
+                    createNotificationChannel()
+                    startForeground(NOTIFICATION_ID, buildNotification("Recording your location"))
+                    startLocationUpdates()
+                    val savedResumeAt = settingsStore.resumeAtMillis.first()
+                    if (state == TrackingState.PAUSED && savedResumeAt > System.currentTimeMillis()) {
+                        _state.value = TrackingState.PAUSED
+                        _resumeAtMillis.value = savedResumeAt
+                        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                        updateNotification("Paused — resumes at ${timeFormat.format(Date(savedResumeAt))}")
+                    } else {
+                        _state.value = TrackingState.TRACKING
+                        _resumeAtMillis.value = 0L
+                    }
+                    Log.d(TAG, "Service restarted by system — restored state: ${_state.value}")
+                } else {
+                    stopSelf()
+                }
+            }
+            return START_STICKY
+        }
+
+        when (intent.action) {
             ACTION_START -> {
                 if (_state.value == TrackingState.STOPPED) {
                     createNotificationChannel()
                     startForeground(NOTIFICATION_ID, buildNotification("Recording your location"))
-                    startLocationUpdates()
+                    serviceScope.launch {
+                        startLocationUpdates()
+                    }
                     _state.value = TrackingState.TRACKING
+                    persistState(TrackingState.TRACKING, 0L)
                 }
             }
             ACTION_STOP -> stopTracking()
@@ -128,17 +204,36 @@ class LocationService : Service() {
                     resumeTracking()
                 }
             }
+            ACTION_UPDATE_SETTINGS -> {
+                if (_state.value == TrackingState.TRACKING) {
+                    // Restart location updates with new settings
+                    fusedLocationClient.removeLocationUpdates(locationCallback)
+                    serviceScope.launch {
+                        startLocationUpdates()
+                    }
+                    Log.d(TAG, "Settings updated — restarting location updates")
+                }
+            }
         }
         return START_STICKY
     }
 
-    private fun startLocationUpdates() {
+    private suspend fun startLocationUpdates() {
+        val intervalMinutes = settingsStore.intervalMinutes.first()
+        val highAccuracy = settingsStore.highAccuracy.first()
+
+        val intervalMs = intervalMinutes * 60 * 1000L
+        val priority = if (highAccuracy) Priority.PRIORITY_HIGH_ACCURACY
+                       else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+
+        _currentIntervalMinutes.value = intervalMinutes
+
         val locationRequest = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            TRACKING_INTERVAL_MS
+            priority,
+            intervalMs
         ).apply {
-            setMinUpdateIntervalMillis(TRACKING_INTERVAL_MS)
-            setMaxUpdateDelayMillis(TRACKING_INTERVAL_MS * 2)
+            setMinUpdateIntervalMillis(intervalMs)
+            setMaxUpdateDelayMillis(intervalMs * 2)
         }.build()
 
         try {
@@ -147,7 +242,7 @@ class LocationService : Service() {
                 locationCallback,
                 Looper.getMainLooper()
             )
-            Log.d(TAG, "Location updates started with interval ${TRACKING_INTERVAL_MS / 1000}s")
+            Log.d(TAG, "Location updates started: interval=${intervalMinutes}min, highAccuracy=$highAccuracy")
         } catch (e: SecurityException) {
             Log.e(TAG, "Missing location permission: ${e.message}")
             stopSelf()
@@ -155,11 +250,10 @@ class LocationService : Service() {
     }
 
     private fun pauseTracking(durationMs: Long) {
-        // Don't stop location updates — just mark as paused.
-        // The locationCallback will discard locations until the pause expires.
         val resumeAt = System.currentTimeMillis() + durationMs
         _resumeAtMillis.value = resumeAt
         _state.value = TrackingState.PAUSED
+        persistState(TrackingState.PAUSED, resumeAt)
 
         val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
         val resumeTimeStr = timeFormat.format(Date(resumeAt))
@@ -171,6 +265,7 @@ class LocationService : Service() {
     private fun resumeTracking() {
         _resumeAtMillis.value = 0L
         _state.value = TrackingState.TRACKING
+        persistState(TrackingState.TRACKING, 0L)
         updateNotification("Recording your location")
         Log.d(TAG, "Tracking resumed (manual)")
     }
@@ -181,6 +276,7 @@ class LocationService : Service() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         _resumeAtMillis.value = 0L
         _state.value = TrackingState.STOPPED
+        persistState(TrackingState.STOPPED, 0L)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "Tracking stopped")

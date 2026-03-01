@@ -27,28 +27,36 @@
 ### Milestone 4: Pause for X Minutes
 - "Pause Tracking" button on Home screen (visible only while tracking)
 - Duration picker dialog: preset buttons (15min, 30min, 1h, 2h) + custom input
-- Service enters paused state (stops location requests but keeps running)
+- Service enters paused state (discards incoming locations but keeps running)
 - Notification updates to show "Paused — resumes at HH:MM"
-- Auto-resumes after the pause duration expires (via Handler)
+- Auto-resumes after the pause duration expires (via locationCallback)
 - Home screen shows paused state with live countdown timer
 - "Resume Now" button to manually end the pause early
 - Service state exposed via StateFlow — UI always shows correct state even after reopening app
 - Pause state survives app being closed (service handles the timer)
 
+### Milestone 5a: Settings Screen + DataStore
+- Settings screen accessible via gear icon in top app bar
+- Back arrow navigation to return to Home
+- Settings options:
+  - **Tracking interval**: slider, 1–60 minutes (default: 10)
+  - **Location precision**: switch toggle between high accuracy (GPS) and balanced power (network)
+  - **Auto-start on boot**: switch toggle (default: off, UI only — implementation in Milestone 6)
+- Settings persisted using Jetpack DataStore (Preferences)
+- LocationService reads interval + precision from DataStore on start and on settings change
+- `ACTION_UPDATE_SETTINGS` intent restarts location updates with new settings while tracking
+- Status card on Home screen displays the actual configured interval
+- Removed hardcoded `TRACKING_INTERVAL_MS` constant — interval is now fully configurable
+
 ---
 
 ## Planned
 
-### Milestone 5: Settings Screen
-- Add bottom navigation: Home | History | Settings
-- Settings screen with:
-  - **Tracking interval**: slider or input, 1–60 minutes (default: 10)
-  - **Location precision**: toggle between high accuracy (GPS) and balanced power (network)
-  - **Auto-start on boot**: toggle (default: off)
-- Persist settings using Jetpack DataStore (Preferences)
-- LocationService reads settings and applies them dynamically
-- Changing interval while tracking takes effect on next cycle
-- Changing precision while tracking takes effect immediately
+### Milestone 5b: Bottom Navigation
+- Add bottom navigation bar: Home | History | Settings
+- Replace gear icon / simple screen switching with proper navigation
+- Move Settings screen into the nav bar
+- Placeholder History screen (to be implemented in Milestone 7)
 
 ### Milestone 6: Boot Auto-Start
 - `BootReceiver` registered in AndroidManifest for `BOOT_COMPLETED`

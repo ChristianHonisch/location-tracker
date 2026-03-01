@@ -15,14 +15,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +31,7 @@ import com.loctracker.data.db.AppDatabase
 import com.loctracker.data.db.LocationEntity
 import com.loctracker.service.LocationService
 import com.loctracker.service.LocationService.TrackingState
+import com.loctracker.ui.screens.SettingsScreen
 import com.loctracker.ui.theme.LocTrackerTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,11 +45,50 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             LocTrackerTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    LocationScreen(modifier = Modifier.padding(innerPadding))
+                var currentScreen by remember { mutableStateOf("home") }
+                val context = LocalContext.current
+
+                when (currentScreen) {
+                    "home" -> HomeScreen(
+                        onOpenSettings = { currentScreen = "settings" }
+                    )
+                    "settings" -> SettingsScreen(
+                        onBack = { currentScreen = "home" },
+                        onSettingsChanged = {
+                            // Only notify the service if it's actually tracking
+                            if (LocationService.state.value != TrackingState.STOPPED) {
+                                val intent = Intent(context, LocationService::class.java).apply {
+                                    action = LocationService.ACTION_UPDATE_SETTINGS
+                                }
+                                context.startService(intent)
+                            }
+                        }
+                    )
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(onOpenSettings: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("LocTracker", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        LocationScreen(modifier = Modifier.padding(innerPadding))
     }
 }
 
@@ -62,9 +102,16 @@ fun LocationScreen(modifier: Modifier = Modifier) {
     val recentLocations by dao.getRecentLocations(10).collectAsState(initial = emptyList())
     val locationCount by dao.getCount().collectAsState(initial = 0)
 
+    // Restore service state from DataStore on cold start (companion object statics
+    // reset to defaults when Android kills the app process)
+    LaunchedEffect(Unit) {
+        LocationService.restoreStateFromDataStore(context)
+    }
+
     // Observe service state
     val trackingState by LocationService.state.collectAsState()
     val resumeAtMillis by LocationService.resumeAtMillis.collectAsState()
+    val currentIntervalMinutes by LocationService.currentIntervalMinutes.collectAsState()
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showClearDialog by remember { mutableStateOf(false) }
@@ -79,6 +126,14 @@ fun LocationScreen(modifier: Modifier = Modifier) {
                 remainingSeconds = if (remaining > 0) remaining else 0
                 if (remaining <= 0) break
                 delay(1000)
+            }
+            // Timer expired but service may not have auto-resumed yet (no location
+            // callback has fired). Nudge the service to resume immediately.
+            if (trackingState == TrackingState.PAUSED) {
+                val intent = Intent(context, LocationService::class.java).apply {
+                    action = LocationService.ACTION_RESUME
+                }
+                context.startService(intent)
             }
         } else {
             remainingSeconds = 0
@@ -135,6 +190,16 @@ fun LocationScreen(modifier: Modifier = Modifier) {
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasNotificationPermission = granted
+        // Start tracking after the permission dialog is dismissed (regardless of result,
+        // since notification permission is optional — tracking works without it)
+        val intent = Intent(context, LocationService::class.java).apply {
+            action = LocationService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     fun startTracking() {
@@ -195,6 +260,7 @@ fun LocationScreen(modifier: Modifier = Modifier) {
 
         if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return // startTracking() will be called from the permission callback
         }
 
         startTracking()
@@ -241,19 +307,10 @@ fun LocationScreen(modifier: Modifier = Modifier) {
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Header
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "LocTracker",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 24.dp)
-            )
-        }
-
         // Status card
         item {
+            Spacer(modifier = Modifier.height(8.dp))
+
             val containerColor = when (trackingState) {
                 TrackingState.TRACKING -> MaterialTheme.colorScheme.primaryContainer
                 TrackingState.PAUSED -> MaterialTheme.colorScheme.tertiaryContainer
@@ -322,7 +379,7 @@ fun LocationScreen(modifier: Modifier = Modifier) {
                                 color = contentColor.copy(alpha = 0.7f)
                             )
                             Text(
-                                text = "${LocationService.TRACKING_INTERVAL_MS / 1000 / 60} min",
+                                text = "$currentIntervalMinutes min",
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 14.sp,
                                 color = contentColor
@@ -371,7 +428,7 @@ fun LocationScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        // Pause / Resume button (only visible when tracking or paused)
+        // Pause / Resume button
         if (trackingState == TrackingState.TRACKING) {
             item {
                 OutlinedButton(
@@ -539,7 +596,7 @@ fun PauseDurationDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Or enter custom minutes:",
+                    text = "Or enter custom minutes (max 1440 / 24h):",
                     fontSize = 13.sp,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
@@ -552,7 +609,9 @@ fun PauseDurationDialog(
                         onValueChange = { value ->
                             customMinutes = value.filter { it.isDigit() }
                         },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                        ),
                         label = { Text("Minutes") },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -561,11 +620,11 @@ fun PauseDurationDialog(
                     Button(
                         onClick = {
                             val mins = customMinutes.toLongOrNull()
-                            if (mins != null && mins > 0) {
+                            if (mins != null && mins in 1..1440) {
                                 onSelect(mins)
                             }
                         },
-                        enabled = customMinutes.toLongOrNull()?.let { it > 0 } == true
+                        enabled = customMinutes.toLongOrNull()?.let { it in 1..1440 } == true
                     ) {
                         Text("Go")
                     }
