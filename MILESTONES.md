@@ -68,15 +68,19 @@
 
 ---
 
-## Planned
-
 ### Milestone 6: Boot Auto-Start
 - `BootReceiver` registered in AndroidManifest for `BOOT_COMPLETED`
-- On boot: checks if auto-start is enabled in settings
-- If enabled and tracking was active before shutdown: restarts the foreground service
-- Stores last tracking state (running/stopped) in DataStore
-- Add `RECEIVE_BOOT_COMPLETED` permission to manifest
-- Works reliably on Android 8+ with foreground service start restrictions
+- `RECEIVE_BOOT_COMPLETED` permission added to manifest
+- On boot: reads `autoStartOnBoot` and `trackingState` from DataStore
+- Restarts foreground service only if auto-start is enabled **and** tracking was previously active (`TRACKING` or `PAUSED`)
+- Respects explicit stop — if user stopped tracking before reboot, it stays stopped
+- Uses `runBlocking` for DataStore reads in receiver (standard pattern, microsecond reads)
+- Tracking state already persisted to DataStore (from Tier 1 ISSUE-1 fix)
+- Works on Android 8+ with `startForegroundService()`
+
+---
+
+## Planned
 
 ### Milestone 7: History & Export
 - History screen (second tab in bottom navigation)
