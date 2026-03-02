@@ -26,7 +26,6 @@ import com.loctracker.data.db.LocationEntity
 import com.loctracker.service.LocationService
 import com.loctracker.service.LocationService.TrackingState
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -41,7 +40,6 @@ private fun LocationContent(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getInstance(context) }
     val dao = remember { db.locationDao() }
-    val scope = rememberCoroutineScope()
 
     val recentLocations by dao.getRecentLocations(10).collectAsState(initial = emptyList())
     val locationCount by dao.getCount().collectAsState(initial = 0)
@@ -58,7 +56,6 @@ private fun LocationContent(modifier: Modifier = Modifier) {
     val currentIntervalMinutes by LocationService.currentIntervalMinutes.collectAsState()
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showClearDialog by remember { mutableStateOf(false) }
     var showPauseDialog by remember { mutableStateOf(false) }
 
     // Countdown timer for pause remaining time
@@ -208,30 +205,6 @@ private fun LocationContent(modifier: Modifier = Modifier) {
         }
 
         startTracking()
-    }
-
-    // Clear all confirmation dialog
-    if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = { Text("Clear All Locations") },
-            text = { Text("Delete all $locationCount saved locations? This cannot be undone.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch { dao.deleteAll() }
-                        showClearDialog = false
-                    }
-                ) {
-                    Text("Delete All", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     // Pause duration picker dialog
@@ -475,26 +448,16 @@ private fun LocationContent(modifier: Modifier = Modifier) {
             }
         }
 
-        // Recent locations header + clear button
+        // Recent locations header
         if (recentLocations.isNotEmpty()) {
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 24.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (locationCount > 10) "Recent Locations (last 10 of $locationCount)"
-                        else "Recent Locations ($locationCount)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
-                    TextButton(onClick = { showClearDialog = true }) {
-                        Text("Clear All", color = MaterialTheme.colorScheme.error)
-                    }
-                }
+                Text(
+                    text = if (locationCount > 10) "Recent Locations (last 10 of $locationCount)"
+                    else "Recent Locations ($locationCount)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
+                )
             }
 
             items(recentLocations, key = { it.id }) { entity ->

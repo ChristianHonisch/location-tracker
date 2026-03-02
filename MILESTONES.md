@@ -80,22 +80,28 @@
 
 ---
 
-## Planned
-
 ### Milestone 7: History & Export
-- History screen (second tab in bottom navigation)
-- Locations grouped by day:
-  - Each row: date, number of points, first/last timestamp
-  - Tappable to expand and show individual points for that day
-  - Each point has an OSM link
+- History screen replaces placeholder in bottom navigation
+- Locations grouped by day (UTC day boundaries via SQL GROUP BY):
+  - Each day card shows: date, point count, first/last time
+  - Tappable to expand/collapse with animated visibility
+  - Expanded view shows all individual points with OSM links
 - Export functionality:
-  - Export all data or a selected day as GeoJSON
-  - Uses `ACTION_CREATE_DOCUMENT` intent for file picker
+  - "Export All" button at top of History screen
+  - "Export Day" button per expanded day
+  - Uses `ActivityResultContracts.CreateDocument` for file picker
+  - File names: `loctracker_all.geojson` or `loctracker_YYYY-MM-DD.geojson`
   - GeoJSON `FeatureCollection` with `Point` features
-  - Properties per point: altitude, accuracy, timestamp
+  - Properties per point: timestamp (ISO 8601 UTC), accuracy, altitude
+  - Uses `org.json` (built into Android, no external dependency)
 - Delete functionality:
-  - Delete individual days
-  - Delete all data (moved here from Home screen)
+  - "Delete All" button at top (with confirmation dialog)
+  - "Delete Day" button per expanded day (with confirmation dialog)
+  - "Clear All" removed from Home screen — data management is now in History
+- Empty state: message shown when no locations recorded
+- New DAO queries: `getDaySummaries()`, `getLocationsForDay()`, `deleteDay()`, `getAllLocationsOnce()`, `getLocationsForDayOnce()`
+- New `DaySummary` data class for GROUP BY results
+- New `GeoJsonExporter` utility in `data/export/`
 
 ---
 
