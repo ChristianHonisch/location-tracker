@@ -1,13 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Backup rules for Android < 12 (fullBackupContent).
+   Exclude the location database (sensitive data) but allow
+   DataStore preferences to be backed up.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="database" path="loctracker.db" />
+    <exclude domain="database" path="loctracker.db-shm" />
+    <exclude domain="database" path="loctracker.db-wal" />
 </full-backup-content>

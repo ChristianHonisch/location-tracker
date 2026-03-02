@@ -4,10 +4,9 @@ import com.loctracker.data.db.LocationEntity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 /**
  * Exports a list of LocationEntity to GeoJSON format.
@@ -21,9 +20,10 @@ import java.util.TimeZone
  */
 object GeoJsonExporter {
 
-    private val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
+    // DateTimeFormatter is immutable and thread-safe (unlike SimpleDateFormat)
+    private val isoFormatter: DateTimeFormatter = DateTimeFormatter
+        .ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'")
+        .withZone(ZoneOffset.UTC)
 
     fun export(locations: List<LocationEntity>, outputStream: OutputStream) {
         val featureCollection = JSONObject().apply {
@@ -55,7 +55,7 @@ object GeoJsonExporter {
         }
 
         val properties = JSONObject().apply {
-            put("timestamp", isoFormat.format(Date(location.timestamp)))
+            put("timestamp", isoFormatter.format(Instant.ofEpochMilli(location.timestamp)))
             if (location.accuracy != null) {
                 put("accuracy", location.accuracy.toDouble())
             }

@@ -32,17 +32,28 @@ interface LocationDao {
 
     // --- History queries ---
 
+    /**
+     * Groups locations into local-timezone days.
+     * [offsetMs] is the device timezone's current UTC offset in milliseconds
+     * (e.g. UTC+2 → 7200000).  Adding it before the integer division shifts
+     * the day boundary from midnight UTC to midnight local time.
+     *
+     * Note: dayMillis is the LOCAL midnight expressed as a UTC epoch value
+     * (i.e. local-midnight minus the offset), so callers can convert it back
+     * with Date(dayMillis) or Instant.ofEpochMilli(dayMillis) and format in
+     * local timezone to get the correct date string.
+     */
     @Query("""
         SELECT 
-            (timestamp / 86400000) * 86400000 AS dayMillis,
+            ((timestamp + :offsetMs) / 86400000) * 86400000 - :offsetMs AS dayMillis,
             COUNT(*) AS pointCount,
             MIN(timestamp) AS firstTimestamp,
             MAX(timestamp) AS lastTimestamp
         FROM locations 
-        GROUP BY timestamp / 86400000 
+        GROUP BY (timestamp + :offsetMs) / 86400000 
         ORDER BY dayMillis DESC
     """)
-    fun getDaySummaries(): Flow<List<DaySummary>>
+    fun getDaySummaries(offsetMs: Long): Flow<List<DaySummary>>
 
     @Query("""
         SELECT * FROM locations 

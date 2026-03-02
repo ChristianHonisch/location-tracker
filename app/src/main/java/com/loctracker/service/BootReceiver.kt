@@ -43,10 +43,12 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        Log.d(TAG, "Starting location service after boot")
-        val serviceIntent = Intent(context, LocationService::class.java).apply {
-            action = LocationService.ACTION_START
-        }
+        // Send intent WITHOUT an action so that the null-intent / restore path
+        // in onStartCommand() runs.  This correctly restores the exact state
+        // (TRACKING or PAUSED with the saved resumeAt timestamp) from DataStore
+        // instead of always starting fresh as TRACKING.
+        Log.d(TAG, "Starting location service after boot (restore path)")
+        val serviceIntent = Intent(context, LocationService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(serviceIntent)
         } else {

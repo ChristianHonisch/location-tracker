@@ -20,7 +20,12 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "loctracker.db"
-                ).build().also { INSTANCE = it }
+                )
+                    // If we bump the schema version without writing a migration,
+                    // Room will wipe the DB rather than crashing with an
+                    // IllegalStateException. Acceptable for a local-only app.
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build().also { INSTANCE = it }
             }
         }
     }

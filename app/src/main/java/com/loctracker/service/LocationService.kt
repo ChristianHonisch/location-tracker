@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -153,14 +154,18 @@ class LocationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Null intent means the system restarted us after process death (START_STICKY).
-        // Restore state from DataStore and resume tracking.
-        if (intent == null) {
+        // Null action (but non-null intent) means BootReceiver sent us a restore request.
+        // Both cases: restore state from DataStore.
+        // IMPORTANT: Call startForeground() synchronously — Android 12+ kills the
+        // service if it isn't called within ~5 seconds of onStartCommand().
+        if (intent == null || intent.action == null) {
+            createNotificationChannel()
+            startForeground(NOTIFICATION_ID, buildNotification("Restoring tracking..."))
+
             serviceScope.launch {
                 val savedState = settingsStore.trackingState.first()
                 val state = try { TrackingState.valueOf(savedState) } catch (_: Exception) { TrackingState.STOPPED }
                 if (state != TrackingState.STOPPED) {
-                    createNotificationChannel()
-                    startForeground(NOTIFICATION_ID, buildNotification("Recording your location"))
                     startLocationUpdates()
                     val savedResumeAt = settingsStore.resumeAtMillis.first()
                     if (state == TrackingState.PAUSED && savedResumeAt > System.currentTimeMillis()) {
@@ -171,9 +176,12 @@ class LocationService : Service() {
                     } else {
                         _state.value = TrackingState.TRACKING
                         _resumeAtMillis.value = 0L
+                        updateNotification("Recording your location")
                     }
                     Log.d(TAG, "Service restarted by system — restored state: ${_state.value}")
                 } else {
+                    // Was stopped — tear down the foreground notification and stop
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
             }
@@ -333,6 +341,13 @@ class LocationService : Service() {
             _state.value = TrackingState.STOPPED
         }
         _resumeAtMillis.value = 0L
+        // Persist STOPPED state synchronously before cancelling the scope.
+        // Without this, the async persistState() write gets cancelled and
+        // on next cold start the app thinks tracking is still active.
+        runBlocking {
+            settingsStore.setTrackingState(TrackingState.STOPPED.name)
+            settingsStore.setResumeAtMillis(0L)
+        }
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed")
     }

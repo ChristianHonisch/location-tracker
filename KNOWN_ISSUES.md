@@ -8,6 +8,60 @@
 
 **Fix:** Added `ACTION_RESUME` intent from the UI's `LaunchedEffect` countdown when `remainingSeconds` reaches 0. The service now resumes immediately instead of waiting for the next location callback.
 
+### ~~4. startForeground() crash on system restart (Android 12+)~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Symptom:** On Android 12+, the system could kill the service on process-death restart because `startForeground()` was called inside a coroutine (after an async DataStore read), potentially exceeding the 5-second deadline.
+
+**Fix:** Moved `createNotificationChannel()` and `startForeground()` to run synchronously in `onStartCommand()` before launching the async DataStore restore coroutine.
+
+### ~~5. onDestroy didn't persist STOPPED state~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Symptom:** After the service was destroyed, DataStore still contained TRACKING/PAUSED state. On next cold start, the app would incorrectly think tracking was still active.
+
+**Fix:** Added `runBlocking` persist of STOPPED state in `onDestroy()` before cancelling the coroutine scope.
+
+### ~~6. SimpleDateFormat thread-safety in GeoJsonExporter~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Fix:** Replaced `SimpleDateFormat` singleton with thread-safe `java.time.format.DateTimeFormatter`.
+
+### ~~7. No Room migration strategy~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Fix:** Added `fallbackToDestructiveMigration(dropAllTables = true)` to `AppDatabase` builder. Schema changes will wipe data instead of crashing.
+
+### ~~8. BootReceiver always sent ACTION_START, losing PAUSED state~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Fix:** BootReceiver now sends an action-less intent, triggering the service's DataStore restore path which correctly restores TRACKING or PAUSED state.
+
+### ~~9. History day grouping used UTC, UI displayed local time~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Symptom:** Points recorded near midnight could appear under the wrong day in the History tab.
+
+**Fix:** `getDaySummaries()` now takes a timezone offset parameter. HistoryScreen passes the device's current UTC offset (including DST).
+
+### ~~10. Expanded day rendered all points at once (jank risk)~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Fix:** Expanded days now show a maximum of 50 points initially, with a "Show all N points" button to load the rest.
+
+### ~~11. allowBackup leaked location database~~ (Fixed)
+
+**Fixed in:** Review 2 — Tier 1 fixes
+
+**Fix:** Updated `backup_rules.xml` and `data_extraction_rules.xml` to exclude `loctracker.db` (and WAL/SHM files) from cloud backup and device transfer. Settings (DataStore) are still backed up.
+
 ---
 
 ## Open Issues

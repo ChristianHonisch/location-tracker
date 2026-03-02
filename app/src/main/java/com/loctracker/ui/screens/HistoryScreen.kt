@@ -34,6 +34,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 private const val MS_PER_DAY = 86400000L
 
@@ -44,7 +45,13 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
     val dao = remember { db.locationDao() }
     val scope = rememberCoroutineScope()
 
-    val daySummaries by dao.getDaySummaries().collectAsState(initial = emptyList())
+    // Use the device's current UTC offset (including DST) so day grouping
+    // matches the local dates shown in the UI.
+    val tzOffsetMs = remember {
+        val tz = TimeZone.getDefault()
+        tz.getOffset(System.currentTimeMillis()).toLong()
+    }
+    val daySummaries by dao.getDaySummaries(tzOffsetMs).collectAsState(initial = emptyList())
     val locationCount by dao.getCount().collectAsState(initial = 0)
 
     // Track which days are expanded
@@ -331,14 +338,34 @@ private fun DayCard(
                     daySummary.dayMillis + MS_PER_DAY
                 ).collectAsState(initial = emptyList())
 
+                val maxVisible = 50
+                var showAll by remember { mutableStateOf(false) }
+                val visibleLocations = if (showAll || dayLocations.size <= maxVisible) {
+                    dayLocations
+                } else {
+                    dayLocations.take(maxVisible)
+                }
+
                 Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                     HorizontalDivider(
                         modifier = Modifier.padding(bottom = 8.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
                     )
 
-                    dayLocations.forEach { location ->
+                    visibleLocations.forEach { location ->
                         LocationPointRow(location = location, timeFormat = timeFormat)
+                    }
+
+                    if (!showAll && dayLocations.size > maxVisible) {
+                        TextButton(
+                            onClick = { showAll = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Show all ${dayLocations.size} points",
+                                fontSize = 13.sp
+                            )
+                        }
                     }
 
                     // Day action buttons
