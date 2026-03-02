@@ -149,6 +149,15 @@ fun SettingsScreen(
             )
         }
 
+        if (autoStartOnBoot) {
+            Text(
+                text = "Note: On Samsung, Xiaomi, and some other devices, you may also need to exclude LocTracker from battery optimization for auto-start to work reliably. Go to Settings > Apps > LocTracker > Battery > Unrestricted.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+
         HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
         // Info
