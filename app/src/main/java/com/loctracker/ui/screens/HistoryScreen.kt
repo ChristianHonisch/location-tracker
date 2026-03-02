@@ -64,14 +64,21 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/geo+json")
     ) { uri ->
+        // Capture state before resetting (the coroutine is async and would
+        // read stale values if we reset before it runs)
+        val isExportAll = exportAllRequested
+        val dayMillis = pendingExportDayMillis
+        exportAllRequested = false
+        pendingExportDayMillis = null
+
         uri?.let {
             scope.launch {
                 try {
                     val locations = withContext(Dispatchers.IO) {
-                        if (exportAllRequested) {
+                        if (isExportAll) {
                             dao.getAllLocationsOnce()
                         } else {
-                            val dayStart = pendingExportDayMillis ?: return@withContext emptyList()
+                            val dayStart = dayMillis ?: return@withContext emptyList()
                             dao.getLocationsForDayOnce(dayStart, dayStart + MS_PER_DAY)
                         }
                     }
@@ -90,9 +97,6 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
-        // Reset export state
-        exportAllRequested = false
-        pendingExportDayMillis = null
     }
 
     fun startExportAll() {
